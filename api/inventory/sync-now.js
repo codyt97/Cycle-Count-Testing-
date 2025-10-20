@@ -7,5 +7,5 @@ module.exports = async (req, res) => {
   if (!req.headers["x-sync-token"] && req.query && req.query.token) {
     req.headers["x-sync-token"] = String(req.query.token);
   }
-  return driveSync(req, res);
+  return driveSync(req, res); 
 };
