@@ -1,4 +1,4 @@
-// api/inventory/status.js
+// api/inventory/status.js 
 const { ok, method, withCORS } = require("../_lib/respond");
 const Store = require("../_lib/store");
 
