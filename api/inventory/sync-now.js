@@ -1,4 +1,4 @@
- // api/inventory/sync-now.js 
+ // api/inventory/sync-now.js
 const driveSync = require("./drive-sync");
 module.exports = async (req, res) => {
   // allow GET for convenience
