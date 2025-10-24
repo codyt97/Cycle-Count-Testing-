@@ -1,4 +1,4 @@
- // api/inventory/bin-live.js
+ // api/inventory/bin-live.js 
 const { google } = require("googleapis");
 const XLSX = require("xlsx");
 const { ok, bad, method, withCORS } = require("../_lib/respond");
