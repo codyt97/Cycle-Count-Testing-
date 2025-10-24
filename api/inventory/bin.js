@@ -1,4 +1,4 @@
-// api/inventory/bin.js 
+// api/inventory/bin.js  
 const { ok, bad, method, withCORS } = require("../_lib/respond");
 const Store = require("../_lib/store");
 
