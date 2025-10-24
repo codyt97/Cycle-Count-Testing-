@@ -1,5 +1,5 @@
 // api/inventory/rebuild-store.js
-/* eslint-disable no-console */
+/* eslint-disable no-console */ 
 const XLSX = require("xlsx");
 const { ok, bad, method, withCORS } = require("../_lib/respond");
 const Store = require("../_lib/store");
