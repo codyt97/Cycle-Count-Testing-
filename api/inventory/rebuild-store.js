@@ -1,4 +1,4 @@
-// api/inventory/rebuild-store.js
+// api/inventory/rebuild-store.js 
 /* Rebuilds the inventory snapshot from the Drive file into Redis (Store).
    - Preserves leading zeros via XLSX { raw:false }
    - Merges Site+Bin into a single `location`
