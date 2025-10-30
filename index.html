@@ -68,6 +68,8 @@
     tr.ok{background:var(--cu-green-50)}
     tr.warn{background:#fff7ed}  /* amber for deficits (entered < system) */
     tr.bad{ background:#fee2e2}  /* red for overcounts (entered > system) */
+    #investigation-overage .table-wrap, #supervisor-overage .table-wrap{ max-height:280px; overflow:auto; }
+    #investigation-overage thead th, #supervisor-overage thead th{ position:sticky; top:0; background:#fff; z-index:1; }
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
     .qty{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;font-weight:800;background:#eef3ea;color:#1f3a1a}
     .qty.is1{background:var(--cu-green);color:#0a0a0a}
@@ -569,20 +571,57 @@ try {
   const scannedSerials = rows.filter(r =>
     r.systemImei && String(r.scannedImei||"").trim() === String(r.systemImei||"").trim()
   ).length;
+    // Scanned = matched serials + ENTERED qty for non-serials (no cap)
   const scannedNonSerial = rows
     .filter(r => !r.systemImei)
-    .reduce((a, b) => {
-      const sys = Number(String(b.systemQty).replace(/,/g, "").trim()) || 0;
-      const ent = Number(b.qtyEntered || 0);
-      return a + Math.min(ent, sys);
-    }, 0);
+    .reduce((a, b) => a + Math.max(0, Number(b.qtyEntered || 0)), 0);
 
   const scannedCount = scannedSerials + scannedNonSerial;
+
+  // Missing never goes negative once scanned can exceed system
   const missing = Math.max(0, total - scannedCount);
 
   [kpi.total, kpi.total2].forEach(el => el.textContent = total);
   [kpi.scanned, kpi.scanned2].forEach(el => el.textContent = scannedCount);
   [kpi.missing, kpi.missing2].forEach(el => el.textContent = missing);
+
+  // (Optional) Add an "Over by" chip dynamically for clarity
+  const computeOverBy = () =>
+    rows.filter(r => !r.systemImei).reduce((acc, r) => {
+      const sys = Number(String(r.systemQty).replace(/,/g, "").trim()) || 0;
+      const ent = Math.max(0, Number(r.qtyEntered || 0));
+      return acc + Math.max(0, ent - sys);
+    }, 0);
+
+  function ensureOverChip(containerIdPrefix){
+    const cont = document.getElementById(containerIdPrefix);
+    if (!cont) return;
+    let chip = cont.querySelector('[data-kpi="overby"]');
+    if (!chip){
+      chip = document.createElement('div');
+      chip.className = 'chip';
+      chip.setAttribute('data-kpi','overby');
+      chip.innerHTML = `<span class="dot"></span><span class="lbl">Over by</span><span class="val" id="${containerIdPrefix==='kpis'?'kpi-overby':'kpi2-overby'}">0</span>`;
+      cont.appendChild(chip);
+    }
+  }
+  ensureOverChip('kpis');      // top bar
+  ensureOverChip('');          // no-op safeguard
+  const stickyKpis = document.querySelector('#resultsCard .stickybar .kpis');
+  if (stickyKpis && !stickyKpis.querySelector('[data-kpi="overby"]')){
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.setAttribute('data-kpi','overby');
+    chip.innerHTML = `<span class="dot"></span><span class="lbl">Over by</span><span class="val" id="kpi2-overby">0</span>`;
+    stickyKpis.appendChild(chip);
+  }
+
+  const overBy = computeOverBy();
+  const over1 = document.getElementById('kpi-overby');
+  const over2 = document.getElementById('kpi2-overby');
+  if (over1) over1.textContent = String(overBy);
+  if (over2) over2.textContent = String(overBy);
+
 };
 
 
@@ -592,17 +631,117 @@ try {
     const pad = n => String(n).padStart(2,"0");
     const ts = () => { const d=new Date(); return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`; };
 
+    // --- Overage helpers (non-serial, entered > system) ---
+function computeOveragesFromRows(list){
+  return (Array.isArray(list) ? list : [])
+    .filter(r => !r.systemImei)
+    .map(r => {
+      const sys = Number(String(r.systemQty).replace(/,/g,"").trim()) || 0;
+      const ent = Math.max(0, Number(r.qtyEntered || 0));
+      const over = Math.max(0, ent - sys);
+      return {...r, sysQtyNum: sys, entQtyNum: ent, overBy: over};
+    })
+    .filter(r => r.overBy > 0);
+}
+
+function computeOveragesFromApiList(list){
+  return (Array.isArray(list) ? list : [])
+    .filter(r => !String(r.systemImei||"").trim()) // non-serial only
+    .map(r => {
+      const sys = Number(r.systemQty || 0);
+      const ent = Math.max(0, Number(r.qtyEntered || 0));
+      const over = Math.max(0, ent - sys);
+      return {...r, sysQtyNum: sys, entQtyNum: ent, overBy: over};
+    })
+    .filter(r => r.overBy > 0);
+}
+
+function ensureOverageCard(container, cardId, title){
+  if (!container) return null;
+  let card = document.getElementById(cardId);
+  if (!card){
+    card = document.createElement('section');
+    card.className = 'card';
+    card.id = cardId;
+    card.innerHTML = `
+      <div class="head">
+        <div>
+          <div class="h1">${title}</div>
+          <div class="h2">Non-serial items where Entered &gt; System</div>
+        </div>
+      </div>
+      <div class="body">
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Description</th>
+                <th>System Qty</th>
+                <th>Entered Qty</th>
+                <th>Over by</th>
+                <th>Bin</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty" style="display:none">No overages.</div>
+        </div>
+      </div>`;
+    container.appendChild(card);
+  }
+  return card;
+}
+
+function renderOverageTable(cardId, overages){
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  const tbody = card.querySelector('tbody');
+  const empty = card.querySelector('.empty');
+  tbody.innerHTML = '';
+  if (!overages.length){
+    if (empty) empty.style.display = '';
+    card.style.display = 'none';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  card.style.display = '';
+  for (const r of overages){
+    const tr = document.createElement('tr');
+    tr.className = 'bad'; // red for overage
+    tr.innerHTML = `
+      <td class="mono">${escapeHTML(r.sku || r.orderTimeSku || "—")}</td>
+      <td>${escapeHTML(r.description || r.desc || "—")}</td>
+      <td>${r.sysQtyNum}</td>
+      <td>${r.entQtyNum}</td>
+      <td>${r.overBy}</td>
+      <td class="mono">${escapeHTML(r.location || r.bin || "—")}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
     const renderTable = () => {
       if (!rows.length){ resultsCard.style.display="none"; emptyCard.style.display="block"; setKPIs(); submitBinBtn.disabled = true; return; }
       resultsCard.style.display="block"; emptyCard.style.display="none";
       submitBinBtn.disabled = (currentUser?.role !== ROLES.COUNTER);
       tbody.innerHTML = rows.map((r, i) => {
-  const matched = !!(r.systemImei && r.scannedImei && String(r.scannedImei).trim() === String(r.systemImei).trim());
+    const matched = !!(r.systemImei && r.scannedImei && String(r.scannedImei).trim() === String(r.systemImei).trim());
   const sysQty = Number(String(r.systemQty).replace(/,/g,"").trim()) || (r.systemImei ? 1 : 0);
-  const qtyVal = r.hasSerial ? (matched ? 1 : 0) : Math.max(0, Math.min(sysQty, Number(r.qtyEntered || 0)));
+  const qtyVal = r.hasSerial ? (matched ? 1 : 0) : Math.max(0, Number(r.qtyEntered || 0));
 
+  // Visual state: serial rows → ok if matched else warn; non-serial → ok/equal, bad/over, warn/under
+  let cls = "";
+  if (r.hasSerial) {
+    cls = matched ? "ok" : "warn";
+  } else {
+    if (qtyVal === sysQty) cls = "ok";
+    else if (qtyVal > sysQty) cls = "bad";
+    else cls = "warn";
+  }
 
-  return `<tr class="${matched?'ok':''}">
+  return `<tr class="${cls}">
+
     <td>${escapeHTML(r.location)}</td>
     <td class="mono">${escapeHTML(r.sku)}</td>
     <td>${escapeHTML(r.description||'—')}</td>
@@ -611,9 +750,9 @@ try {
     <td>${sysQty}</td>
     <td>
       ${r.hasSerial
-        ? `<input type="number" class="qty-input" value="${qtyVal}" min="0" max="${sysQty}" step="1" disabled>`
-        : `<input type="number" class="qty-input" value="${qtyVal}" min="0" max="${sysQty}" step="1" data-idx="${i}">`
-      }
+  ? `<input type="number" class="qty-input" value="${qtyVal}" min="0" step="1" disabled>`
+  : `<input type="number" class="qty-input" value="${qtyVal}" min="0" step="1" data-idx="${i}">`
+}
     </td>
   </tr>`;
 }).join("");
@@ -622,8 +761,7 @@ try {
 tbody.querySelectorAll('.qty-input[data-idx]').forEach(inp => {
   inp.addEventListener('input', () => {
     const idx = Number(inp.getAttribute('data-idx'));
-    const sysQty = Number(rows[idx].systemQty || 0);
-    const v = Math.max(0, Math.min(sysQty, Number(inp.value || 0)));
+    const v = Math.max(0, Number(inp.value || 0)); // allow overcounts
     rows[idx].qtyEntered = v;
     inp.value = v;
     setKPIs();
@@ -671,7 +809,7 @@ const csvEscape = (v) => {
     const sysQty = Number(String(r.systemQty).replace(/,/g,"").trim()) || (r.systemImei ? 1 : 0);
     const qtyEnt = r.systemImei
   ? (String(r.scannedImei||"").trim() === String(r.systemImei||"").trim() ? 1 : 0)
-  : Math.max(0, Math.min(sysQty, Number(r.qtyEntered || 0)));
+  : Math.max(0, Number(r.qtyEntered || 0));
 ;
 
     lines.push(
@@ -947,12 +1085,22 @@ const totalExpected = serialExpected + nonSerialExpected;
 
 const scannedSerials = rows.filter(r => r.systemImei && r.scannedImei === r.systemImei).length;
 const scannedNonSerial = rows.filter(r => !r.systemImei)
-  .reduce((a,b)=> a + Math.min(Number(b.qtyEntered||0), Number(b.systemQty||0)), 0);
+  .reduce((a,b)=> a + Math.max(0, Number(b.qtyEntered||0)), 0);
+
 const scannedTotal = scannedSerials + scannedNonSerial;
 
 const missingList = rows
   .filter(r => r.systemImei && r.scannedImei !== r.systemImei)
   .map(r => ({ sku: r.sku, description: r.description, systemImei: r.systemImei }));
+
+const overages = computeOveragesFromRows(rows).map(r => ({
+  sku: r.sku || "",
+  description: r.description || "",
+  systemQty: r.sysQtyNum,
+  enteredQty: r.entQtyNum,
+  overBy: r.overBy,
+  bin: r.location || currentBin || ""
+}));
 
 const payload = {
   bin: currentBin,
@@ -968,10 +1116,11 @@ const payload = {
     scannedImei: r.scannedImei || "",
     ...(r.hasSerial ? {} : { qtyEntered: Number(r.qtyEntered || 0), systemQty: Number(r.systemQty || 0) })
   })),
+  overages,                 // <— NEW
   missingImeis: missingList,
-  // NEW: send buffered wrong-bin audits with the submit
   wrongBin: pendingWrongBin.slice()
 };
+
 
 
 
@@ -1406,6 +1555,12 @@ async function refreshInvestigator(){
     }).join("")
   : `<tr><td colspan="7" class="empty">No not-scanned items.</td></tr>`;
 
+      // ---- Overage table (Investigator) ----
+    const invContainer = document.querySelector('#page2 .card .body');
+    const invCard = ensureOverageCard(invContainer, 'investigation-overage', 'Overage (Investigator View)');
+    const invOverages = computeOveragesFromApiList(s);
+    renderOverageTable('investigation-overage', invOverages);
+
     showAlerts(investAlerts,[]);
   }catch(e){
     showAlerts(investAlerts,[{type:"warn",msg:`Failed to load investigator data.<br><small>${escapeHTML(String(e.message||e))}</small>`}]);
@@ -1419,6 +1574,12 @@ async function refreshInvestigator(){
 
         // Wrong-bin logs
         const audits = await fetchAuditList();
+        // Also fetch not-scanned items to compute overages for supervisor
+let supShorts = [];
+try {
+  supShorts = await fetchNotScanned();
+} catch {}
+
         supWrongBinBody.innerHTML = (audits.length ? audits.map(it => `
   <tr>
     <td class="mono">${escapeHTML(it.imei)}</td>
@@ -1489,6 +1650,12 @@ supNotScannedBody.innerHTML = (missing.length ? missing.map(it => {
         await patchAudit(id, { status:"resolved", decision, decidedBy: currentUser?.name || "—" });
         await refreshSupervisorViews();
       }catch{
+        // ---- Overage table (Supervisor) ----
+const supContainer = document.querySelector('#page3 .card .body');
+const supCard = ensureOverageCard(supContainer, 'supervisor-overage', 'Overage (Supervisor View)');
+const supOverages = computeOveragesFromApiList(Array.isArray(supShorts) ? supShorts : []);
+renderOverageTable('supervisor-overage', supOverages);
+
         showAlerts(supAlerts,[{type:"warn",msg:"Failed to resolve item."}]);
       }finally{
         btn.disabled = false;
